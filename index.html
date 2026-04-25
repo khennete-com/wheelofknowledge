@@ -134,6 +134,12 @@ padding-top:10px;
 border-top:1px solid #e5e7eb;
 font-style:italic;
 }
+
+ .staffCompact{
+width:100%;
+min-width:100% !important;
+table-layout:fixed;
+}
 </style>
 </head>
 <body>
@@ -154,11 +160,11 @@ DELETE ALL QUESTIONS
 <div id="questionList"></div></div></div><div id="staff" class="section"><div class="container"><h3>Add Staff</h3><input id="staffInput" placeholder="Staff Name"><button onclick="addStaff()">Save Staff</button><label>Compute Scores Between Dates:</label>
 <input type="date" id="staffFromDate" onchange="loadStaff()">
 <input type="date" id="staffToDate" onchange="loadStaff()"><div class="tableWrap">
-<table>
+<table class="staffCompact">
 <colgroup>
-<col style="width:60%">
-<col style="width:20%">
-<col style="width:20%">
+<col style="width:55%">
+<col style="width:22.5%">
+<col style="width:22.5%">
 </colgroup>
 <thead><tr><th>Name</th><th>Correct</th><th>Wrong</th></tr></thead>
 <tbody id="staffTable"></tbody>
