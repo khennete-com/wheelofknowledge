@@ -1,0 +1,383 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f2937">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Wheel of Knowledge</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f3f4f6}
+.header{background:#1f2937;color:#fff;padding:16px;text-align:center;font-size:24px;font-weight:bold}
+.tabs{display:flex;background:#374151}
+.tab{flex:1;padding:14px;color:#fff;text-align:center;cursor:pointer}
+.tab.active{background:#111827}
+.section{display:none;padding:20px}.section.active{display:block}
+.container{max-width:1000px;margin:auto;background:#fff;padding:20px;border-radius:14px;box-shadow:0 0 10px rgba(0,0,0,.1)}
+input,textarea,select,button{width:100%;padding:12px;margin-top:8px;margin-bottom:12px;box-sizing:border-box}
+button{background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer}
+canvas{display:block;margin:20px auto;background:#fff;border-radius:50%}
+.arrow{width:0;height:0;border-left:20px solid transparent;border-right:20px solid transparent;border-top:40px solid red;margin:auto}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:8px;text-align:left}
+.modal{display:none;position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,.5);justify-content:center;align-items:center}
+.modal-content{background:#fff;padding:20px;width:90%;max-width:500px;border-radius:12px}
+
+
+.resultFlash{
+position:fixed;
+left:0;
+top:0;
+width:100%;
+height:100%;
+display:none;
+justify-content:center;
+align-items:center;
+font-size:50px;
+font-weight:bold;
+color:#fff;
+z-index:9999;
+animation:zoomFlash 1.5s ease;
+}
+
+@keyframes zoomFlash{
+0%{transform:scale(.3);opacity:0;}
+30%{transform:scale(1.2);opacity:1;}
+70%{transform:scale(1);opacity:1;}
+100%{transform:scale(.7);opacity:0;}
+}
+</style>
+</head>
+<body>
+<div class="header">Wheel of Knowledge</div>
+<div class="tabs">
+<div class="tab active" onclick="showTab('wheel',this)">Wheel</div>
+<div class="tab" onclick="showTab('questions',this)">Questions</div>
+<div class="tab" onclick="showTab('staff',this)">Staff</div>
+<div class="tab" onclick="showTab('logs',this)">Answer Logs</div>
+<div class="tab" onclick="showTab('system',this)">System</div>
+</div><div id="wheel" class="section active"><div class="container"><div class="arrow"></div><canvas id="wheelCanvas" width="500" height="500"></canvas><button onclick="spinWheel()">SPIN THE WHEEL</button></div></div><div id="questions" class="section"><div class="container"><h3>Add Question</h3><textarea id="questionInput"></textarea><input id="answerInput" placeholder="Correct Answer"><button onclick="addQuestion()">Save Question</button>
+<input type="file" id="xlsxUpload" accept=".xlsx" onchange="importQuestionsXLSX(event)">
+
+<button onclick="deleteAllQuestions()" style="background:#dc2626">
+DELETE ALL QUESTIONS
+</button>
+
+<div id="questionList"></div></div></div><div id="staff" class="section"><div class="container"><h3>Add Staff</h3><input id="staffInput" placeholder="Staff Name"><button onclick="addStaff()">Save Staff</button><label>Compute Scores Between Dates:</label>
+<input type="date" id="staffFromDate" onchange="loadStaff()">
+<input type="date" id="staffToDate" onchange="loadStaff()"><table><thead><tr><th>Name</th><th>Correct</th><th>Wrong</th></tr></thead><tbody id="staffTable"></tbody></table></div></div><div id="logs" class="section"><div class="container"><h3>Answer Logs</h3>
+
+<button onclick="deleteAllLogs()" style="background:#dc2626">
+DELETE ALL LOGS
+</button>
+
+<table><thead><tr><th>Date</th><th>Staff</th><th>Question</th><th>Answer</th><th>Status</th></tr></thead><tbody id="logTable"></tbody></table></div></div><div id="system" class="section">
+<div class="container">
+<h3>System Backup / Restore</h3>
+
+<button onclick="backupWK()">Backup Database to .WK File</button>
+
+<input type="file" id="restoreWFFile" accept=".wk" onchange="restoreWK(event)">
+
+</div>
+</div><div class="modal" id="questionModal"><div class="modal-content"><h3 id="modalQuestion"></h3><p style="background:#ecfdf5;padding:10px;border-left:4px solid green"><b>Correct Answer:</b> <span id="modalCorrect"></span></p><select id="staffName"></select><textarea id="staffAnswer" placeholder="Enter the Answer of Employee here"></textarea><select id="answerStatus"><option>Correct</option><option>Wrong</option></select>
+
+<button onclick="saveAnswerLog()">Submit Answer</button>
+
+<button onclick="retrySpin()" style="background:#f59e0b">
+RE-TRY SPIN
+</button></div></div>
+
+<div id="resultFlash" class="resultFlash"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<script>
+let db,questions=[],selectedQuestion=null,angle=0;
+const canvas=document.getElementById('wheelCanvas'); const ctx=canvas.getContext('2d');
+
+function initDB(){
+ const req=indexedDB.open('WheelKnowledgeDB',5);
+ req.onupgradeneeded=function(e){
+   db=e.target.result;
+   if(!db.objectStoreNames.contains('questions')) db.createObjectStore('questions',{keyPath:'id',autoIncrement:true});
+   if(!db.objectStoreNames.contains('staff')) db.createObjectStore('staff',{keyPath:'id',autoIncrement:true});
+   if(!db.objectStoreNames.contains('logs')) db.createObjectStore('logs',{keyPath:'id',autoIncrement:true});
+ };
+ req.onsuccess=function(e){
+db=e.target.result;
+loadQuestions();
+loadStaff();
+loadLogs();
+restoreLastTab();
+};
+}
+
+function txAdd(store,obj){return new Promise(r=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).add(obj);tx.oncomplete=()=>r();});}
+function txPut(store,obj){return new Promise(r=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=()=>r();});}
+function txGetAll(store){return new Promise(r=>{const tx=db.transaction(store,'readonly');const q=tx.objectStore(store).getAll();q.onsuccess=()=>r(q.result||[]);});}
+
+function showTab(id,el){
+document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+document.getElementById(id).classList.add('active');
+el.classList.add('active');
+localStorage.setItem('lastWheelTab',id);
+}
+
+async function addQuestion(){const q=questionInput.value.trim(),a=answerInput.value.trim();if(!q||!a)return alert('Complete fields');await txAdd('questions',{question:q,correct:a});questionInput.value='';answerInput.value='';loadQuestions();}
+async function addStaff(){const n=staffInput.value.trim();if(!n)return alert('Enter staff');const all=await txGetAll('staff');if(all.find(x=>x.name.toLowerCase()===n.toLowerCase()))return alert('Already exists');await txAdd('staff',{name:n,correct:0,wrong:0});staffInput.value='';loadStaff();alert('Staff saved');}
+
+async function loadQuestions(){
+questions=await txGetAll('questions');
+let h='<table><tr><th>Question</th><th>Correct Answer</th><th>Action</th></tr>';
+questions.forEach(x=>h+=`<tr>
+<td>${x.question}</td>
+<td>${x.correct}</td>
+<td><button onclick="editQuestion(${x.id})">Edit</button></td>
+</tr>`);
+h+='</table>';
+questionList.innerHTML=h;
+drawWheel();
+}
+
+async function editQuestion(id){
+let all=await txGetAll('questions');
+let q=all.find(x=>x.id===id);
+let newQ=prompt('Edit Question',q.question);
+if(newQ===null)return;
+let newA=prompt('Edit Correct Answer',q.correct);
+if(newA===null)return;
+q.question=newQ;
+q.correct=newA;
+await txPut('questions',q);
+loadQuestions();
+alert('Question updated');
+}
+
+async function loadStaff(){
+const s=await txGetAll('staff');
+const logs=await txGetAll('logs');
+const from=staffFromDate.value;
+const to=staffToDate.value;
+let h='',o='<option value="">Select Name</option>';
+
+s.forEach(x=>{
+let c=0,w=0;
+
+logs.forEach(l=>{
+if(l.staff===x.name){
+
+if(from && to){
+if(l.rawdate<from || l.rawdate>to) return;
+}
+
+if(l.status==='Correct') c++;
+else w++;
+}
+});
+
+h+=`<tr><td>${x.name}</td><td>${c}</td><td>${w}</td></tr>`;
+o+=`<option value="${x.name}">${x.name}</option>`;
+});
+
+staffTable.innerHTML=h;
+staffName.innerHTML=o;
+}
+
+
+async function loadLogs(){
+let l=await txGetAll('logs');
+let h='';
+l.reverse().forEach(x=>h+=`<tr><td>${x.datetime}</td><td>${x.staff}</td><td>${x.question}</td><td>${x.answer}</td><td>${x.status}</td></tr>`);
+logTable.innerHTML=h;
+}
+
+function drawWheel(){ctx.clearRect(0,0,500,500);if(!questions.length)return;const slice=2*Math.PI/questions.length;for(let i=0;i<questions.length;i++){ctx.beginPath();ctx.moveTo(250,250);ctx.arc(250,250,230,angle+i*slice,angle+(i+1)*slice);ctx.fillStyle=`hsl(${i*50},70%,70%)`;ctx.fill();ctx.stroke();ctx.save();ctx.translate(250,250);ctx.rotate(angle+i*slice+slice/2);ctx.textAlign='right';ctx.fillText('Q'+(i+1),210,5);ctx.restore();}}
+function spinWheel(){if(!questions.length)return alert('No questions');let spin=Math.random()*360+1440,start=null,init=angle;function anim(ts){if(!start)start=ts;let p=Math.min((ts-start)/4000,1);angle=init+(spin*Math.PI/180)*p;drawWheel();if(p<1)requestAnimationFrame(anim);else finishSpin();}requestAnimationFrame(anim);}
+function finishSpin(){const norm=(2*Math.PI-(angle%(2*Math.PI)))%(2*Math.PI);const slice=2*Math.PI/questions.length;selectedQuestion=questions[Math.floor(norm/slice)%questions.length];modalQuestion.innerText=selectedQuestion.question;modalCorrect.innerText=selectedQuestion.correct;questionModal.style.display='flex';}
+
+async function saveAnswerLog(){const n=staffName.value,a=staffAnswer.value.trim(),s=answerStatus.value;if(n==='' || !a) return alert('Please select staff name and complete answer');const raw=new Date().toISOString().split('T')[0];await txAdd('logs',{datetime:new Date().toLocaleString(),rawdate:raw,staff:n,question:selectedQuestion.question,answer:a,status:s});let all=await txGetAll('staff');let f=all.find(x=>x.name===n);if(f){if(s==='Correct')f.correct++;else f.wrong++;await txPut('staff',f);}staffAnswer.value='';
+loadLogs();
+loadStaff();
+showResultAnimation(s);
+}
+
+async function backupWK(){
+const questions = await txGetAll('questions');
+const staff = await txGetAll('staff');
+const logs = await txGetAll('logs');
+
+const data = {questions,staff,logs};
+
+const json = JSON.stringify(data);
+const bytes = new TextEncoder().encode(json);
+
+const blob = new Blob([bytes.buffer], {type:'application/octet-stream'});
+
+const a = document.createElement('a');
+a.href = URL.createObjectURL(blob);
+a.download = 'wheel_backup.wk';
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
+
+alert('WK backup file created successfully');
+}
+
+async function restoreWK(event){
+const file = event.target.files[0];
+if(!file) return;
+
+if(!confirm('WARNING: Restoring WK backup will overwrite all current live data. Continue?')) return;
+
+const buffer = await file.arrayBuffer();
+const text = new TextDecoder().decode(buffer);
+const data = JSON.parse(text);
+
+for(const s of ['questions','staff','logs']){
+ const old = await txGetAll(s);
+ for(const r of old){
+   const tx = db.transaction(s,'readwrite');
+   tx.objectStore(s).delete(r.id);
+   await new Promise(res=>tx.oncomplete=res);
+ }
+}
+
+for(const q of (data.questions||[])){ delete q.id; await txAdd('questions',q); }
+for(const st of (data.staff||[])){ delete st.id; await txAdd('staff',st); }
+for(const lg of (data.logs||[])){ delete lg.id; await txAdd('logs',lg); }
+
+loadQuestions();
+loadStaff();
+loadLogs();
+
+alert('WK restore completed successfully');
+}
+
+async function importQuestionsXLSX(event){
+const file=event.target.files[0];
+if(!file)return;
+
+const data=await file.arrayBuffer();
+const workbook=XLSX.read(data,{type:'array'});
+const sheet=workbook.Sheets[workbook.SheetNames[0]];
+const rows=XLSX.utils.sheet_to_json(sheet,{header:1});
+
+for(let i=1;i<rows.length;i++){
+ if(rows[i][0] && rows[i][1]){
+   await txAdd('questions',{
+      question:rows[i][0],
+      correct:rows[i][1]
+   });
+ }
+}
+
+loadQuestions();
+alert('Questions imported from XLSX');
+}
+
+async function deleteAllQuestions(){
+
+if(!confirm('WARNING: This will permanently delete ALL encoded questions. Continue?')) return;
+
+if(!confirm('FINAL CONFIRMATION: Are you absolutely sure you want to erase all questions?')) return;
+
+const old = await txGetAll('questions');
+
+for(const r of old){
+   const tx = db.transaction('questions','readwrite');
+   tx.objectStore('questions').delete(r.id);
+   await new Promise(res=>tx.oncomplete=res);
+}
+
+questions = [];
+loadQuestions();
+
+alert('All questions deleted successfully');
+}
+
+async function deleteAllLogs(){
+
+if(!confirm('WARNING: This will permanently delete ALL answer logs. Continue?')) return;
+
+if(!confirm('FINAL CONFIRMATION: Are you sure you want to erase all answer logs?')) return;
+
+const old = await txGetAll('logs');
+
+for(const r of old){
+   const tx = db.transaction('logs','readwrite');
+   tx.objectStore('logs').delete(r.id);
+   await new Promise(res=>tx.oncomplete=res);
+}
+
+loadLogs();
+loadStaff();
+
+alert('All answer logs deleted successfully');
+}
+
+function showResultAnimation(status){
+
+const box = document.getElementById('resultFlash');
+
+if(status === 'Correct'){
+    box.style.background='rgba(22,163,74,0.90)';
+    box.innerHTML='✔ CORRECT ANSWER!';
+}else{
+    box.style.background='rgba(220,38,38,0.90)';
+    box.innerHTML='✖ WRONG ANSWER!';
+}
+
+box.style.display='flex';
+
+setTimeout(()=>{
+   box.style.display='none';
+   questionModal.style.display='none';
+},1500);
+}
+
+function retrySpin(){
+
+if(!confirm('Discard this question and spin again?')) return;
+
+staffAnswer.value='';
+staffName.value='';
+answerStatus.value='Correct';
+questionModal.style.display='none';
+
+setTimeout(()=>{
+   spinWheel();
+},300);
+}
+
+function restoreLastTab(){
+
+const last = localStorage.getItem('lastWheelTab');
+if(!last) return;
+
+document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+
+document.getElementById(last).classList.add('active');
+
+const tabs = document.querySelectorAll('.tab');
+
+if(last==='wheel') tabs[0].classList.add('active');
+if(last==='questions') tabs[1].classList.add('active');
+if(last==='staff') tabs[2].classList.add('active');
+if(last==='logs') tabs[3].classList.add('active');
+if(last==='system') tabs[4].classList.add('active');
+}
+
+
+if ('serviceWorker' in navigator) {
+ navigator.serviceWorker.register('./service-worker.js');
+}
+
+initDB();
+
+
+
+
+</script></body>
+</html>
