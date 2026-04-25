@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wheelknowledge-v7';
+const CACHE_NAME = 'wheelknowledge-v8';
 
 const urlsToCache = [
   './',
